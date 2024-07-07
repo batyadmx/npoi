@@ -223,8 +223,8 @@ namespace NPOI.SS.Converter
             double pixels = (widthUnits / EXCEL_COLUMN_WIDTH_FACTOR)
                     * UNIT_OFFSET_LENGTH;
 
-            double offsetWidthUnits = widthUnits % EXCEL_COLUMN_WIDTH_FACTOR;
-            pixels += (int)Math.Round(offsetWidthUnits / ((float)EXCEL_COLUMN_WIDTH_FACTOR / UNIT_OFFSET_LENGTH));
+            //double offsetWidthUnits = widthUnits % EXCEL_COLUMN_WIDTH_FACTOR;
+            //pixels += (int)Math.Round(offsetWidthUnits / ((float)EXCEL_COLUMN_WIDTH_FACTOR / UNIT_OFFSET_LENGTH));
 
             return pixels;
         }
