@@ -44,6 +44,7 @@ namespace NPOI.SS.Converter
         }
         protected static double GetColumnWidth(ISheet sheet, int columnIndex)
         {
+            
             return ExcelToHtmlUtils.GetColumnWidthInPx(sheet.GetColumnWidth(columnIndex));
         }
         //private HSSFDataFormatter _formatter = new HSSFDataFormatter();
@@ -352,7 +353,7 @@ namespace NPOI.SS.Converter
                     emptyCells.Clear();
 
                     tableRowElement.AppendChild(tableCellElement);
-                    maxRenderedColumn = colIx;
+                    maxRenderedColumn = range != null ? range.LastColumn : colIx;
                 }
             }
 
