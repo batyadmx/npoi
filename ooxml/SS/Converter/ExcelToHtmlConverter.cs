@@ -31,6 +31,11 @@ namespace NPOI.SS.Converter
     using NPOI.HPSF;
     using NPOI.XSSF.UserModel;
     using NPOI.XSSF.Model;
+    using System.Reflection;
+    using System.Linq;
+    using NPOI.OpenXmlFormats.Dml.Spreadsheet;
+    using System.Drawing;
+    using NPOI.POIFS.Storage;
 
     public class ExcelToHtmlConverter
     {
@@ -155,8 +160,9 @@ namespace NPOI.SS.Converter
         protected void ProcessSheet(ISheet sheet)
         {
             ProcessSheetHeader(htmlDocumentFacade.Body, sheet);
+            ProcessImages(sheet);
 
-            int physicalNumberOfRows = sheet.PhysicalNumberOfRows;
+            int physicalNumberOfRows = sheet.LastRowNum + 1;
             if (physicalNumberOfRows <= 0)
                 return;
 
@@ -173,8 +179,11 @@ namespace NPOI.SS.Converter
             {
                 IRow row = sheet.GetRow(r);
 
-                if (row == null)
-                    continue;
+                if(row == null)
+                {
+                    row = sheet.CreateRow(r);
+                    row.CreateCell(0).SetBlank();
+                }
 
                 if (!OutputHiddenRows && row.ZeroHeight)
                     continue;
@@ -216,6 +225,51 @@ namespace NPOI.SS.Converter
             table.AppendChild(tableBody);
 
             htmlDocumentFacade.Body.AppendChild(table);
+        }
+
+        protected void ProcessImages(ISheet sheet)
+        {
+            var images = GetImages(sheet);
+        }
+
+        protected ImageEmbedding[] GetImages(ISheet sheet)
+        {
+            if(sheet is not XSSFSheet)
+                throw new ArgumentException("Not a XSSFSheet");
+
+            var drawing = ((XSSFSheet)sheet).GetDrawingPatriarch();
+
+            if(drawing is null)
+                return null;
+
+            var anchors = drawing.GetCTDrawing().CellAnchors.Where(a => a is CT_TwoCellAnchor).ToArray();
+
+            var images = drawing.RelationParts.Where(p => p.DocumentPart is XSSFPictureData).ToArray();
+
+            var res = new ImageEmbedding[anchors.Length];
+
+            for(int i = 0; i < anchors.Length; i++)
+            {
+                var anchor = (CT_TwoCellAnchor)anchors[i];
+                var image = (XSSFPictureData)images[i].DocumentPart;
+                res[i] = new ImageEmbedding(anchor.from, anchor.to, image.Data);
+            }
+
+            return res;
+        }
+
+        protected class ImageEmbedding
+        {
+            protected CT_Marker from;
+            protected CT_Marker to;
+            protected byte[] data;
+
+            public ImageEmbedding(CT_Marker from, CT_Marker to, byte[] data)
+            {
+                this.data=data;
+                this.to=to;
+                this.from=from;
+            }
         }
 
         protected void ProcessSheetHeader(XmlElement htmlBody, ISheet sheet)
