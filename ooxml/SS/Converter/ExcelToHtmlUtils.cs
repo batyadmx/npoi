@@ -30,7 +30,7 @@ namespace NPOI.SS.Converter
         private const short EXCEL_COLUMN_WIDTH_FACTOR = 256;
         private const int UNIT_OFFSET_LENGTH = 7;
 
-        public static void AppendAlign(StringBuilder style, HorizontalAlignment alignment)
+        public static void AppendAlign(StringBuilder style, HorizontalAlignment alignment, VerticalAlignment verticalAlignment)
         {
             switch (alignment)
             {
@@ -53,6 +53,19 @@ namespace NPOI.SS.Converter
                     break;
                 case HorizontalAlignment.Right:
                     style.Append("text-align: right; ");
+                    break;
+            }
+
+            switch(verticalAlignment)
+            {
+                case VerticalAlignment.Top:
+                    style.Append("vertical-align: top;");
+                    break;
+                case VerticalAlignment.Bottom:
+                    style.Append("vertical-align: bottom;");
+                    break;
+                default:
+                    style.Append("vertical-align: middle;");
                     break;
             }
         }

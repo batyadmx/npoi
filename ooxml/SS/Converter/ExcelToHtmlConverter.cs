@@ -160,7 +160,6 @@ namespace NPOI.SS.Converter
         protected void ProcessSheet(ISheet sheet)
         {
             ProcessSheetHeader(htmlDocumentFacade.Body, sheet);
-            ProcessImages(sheet);
 
             int physicalNumberOfRows = sheet.LastRowNum + 1;
             if (physicalNumberOfRows <= 0)
@@ -173,17 +172,17 @@ namespace NPOI.SS.Converter
 
             CellRangeAddress[][] mergedRanges = ExcelToHtmlUtils.BuildMergedRangesMap(sheet);
 
+            var imagesDict = GetImages(sheet).GroupBy(i => i.from.row)
+                .ToDictionary(g => g.Key, g => g.ToArray());
+            
             List<XmlElement> emptyRowElements = new List<XmlElement>(physicalNumberOfRows);
             int maxSheetColumns = 1;
             for (int r = 0; r < physicalNumberOfRows; r++)
             {
                 IRow row = sheet.GetRow(r);
-
-                if(row == null)
-                {
+                bool isNullRow = row is null;
+                if(isNullRow)
                     row = sheet.CreateRow(r);
-                    row.CreateCell(0).SetBlank();
-                }
 
                 if (!OutputHiddenRows && row.ZeroHeight)
                     continue;
@@ -192,8 +191,9 @@ namespace NPOI.SS.Converter
                 htmlDocumentFacade.AddStyleClass(tableRowElement, "r", "height:"
                         + (row.Height / 20f) + "pt;");
 
+                var rowImages = imagesDict.ContainsKey(r) ? imagesDict[r] : System.Array.Empty<ImageEmbedding>();
                 int maxRowColumnNumber = ProcessRow(mergedRanges, row,
-                        tableRowElement);
+                        tableRowElement, isNullRow, rowImages);
 
                 if (maxRowColumnNumber == 0)
                 {
@@ -227,11 +227,6 @@ namespace NPOI.SS.Converter
             htmlDocumentFacade.Body.AppendChild(table);
         }
 
-        protected void ProcessImages(ISheet sheet)
-        {
-            var images = GetImages(sheet);
-        }
-
         protected ImageEmbedding[] GetImages(ISheet sheet)
         {
             if(sheet is not XSSFSheet)
@@ -240,7 +235,7 @@ namespace NPOI.SS.Converter
             var drawing = ((XSSFSheet)sheet).GetDrawingPatriarch();
 
             if(drawing is null)
-                return null;
+                return new ImageEmbedding[0];
 
             var anchors = drawing.GetCTDrawing().CellAnchors.Where(a => a is CT_TwoCellAnchor).ToArray();
 
@@ -260,9 +255,9 @@ namespace NPOI.SS.Converter
 
         protected class ImageEmbedding
         {
-            protected CT_Marker from;
-            protected CT_Marker to;
-            protected byte[] data;
+            internal CT_Marker from;
+            internal CT_Marker to;
+            internal byte[] data;
 
             public ImageEmbedding(CT_Marker from, CT_Marker to, byte[] data)
             {
@@ -320,10 +315,16 @@ namespace NPOI.SS.Converter
      * @return maximum 1-base index of column that were rendered, zero if none
      */
         protected int ProcessRow(CellRangeAddress[][] mergedRanges, IRow row,
-                XmlElement tableRowElement)
+                XmlElement tableRowElement, bool isNullRow, ImageEmbedding[] rowImages)
         {
+            if (isNullRow)
+                row.CreateCell(0).SetBlank();
+            if(row.Height / 20f < 5)
+                return 0;
+            
             ISheet sheet = (ISheet)row.Sheet;
-            int maxColIx = row.LastCellNum;
+            var lastImgCol = rowImages.Length != 0 ? rowImages.Select(i => i.from.col).Max() : -1;
+            int maxColIx = Math.Max(row.LastCellNum, lastImgCol + 1);
             if (maxColIx <= 0)
                 return 0;
 
@@ -336,6 +337,8 @@ namespace NPOI.SS.Converter
                 emptyCells.Add(tableRowNumberCellElement);
             }
 
+            var imagesDict = rowImages.ToDictionary(i => i.from.col);
+            
             int maxRenderedColumn = 0;
             for (int colIx = 0; colIx < maxColIx; colIx++)
             {
@@ -348,42 +351,33 @@ namespace NPOI.SS.Converter
                 if (range != null && (range.FirstColumn != colIx || range.FirstRow != row.RowNum))
                     continue;
 
-                ICell cell = (ICell)row.GetCell(colIx);
+                ICell cell = row.GetCell(colIx);
 
                 double divWidthPx = 0;
-                if (UseDivsToSpan)
-                {
-                    divWidthPx = GetColumnWidth(sheet, colIx);
-
-                    bool hasBreaks = false;
-                    for (int nextColumnIndex = colIx + 1; nextColumnIndex < maxColIx; nextColumnIndex++)
-                    {
-                        if (!OutputHiddenColumns && sheet.IsColumnHidden(nextColumnIndex))
-                            continue;
-
-                        if (row.GetCell(nextColumnIndex) != null && !IsTextEmpty((ICell)row.GetCell(nextColumnIndex)))
-                        {
-                            hasBreaks = true;
-                            break;
-                        }
-
-                        divWidthPx += GetColumnWidth(sheet, nextColumnIndex);
-                    }
-
-                    if (!hasBreaks)
-                        divWidthPx = int.MaxValue;
-                }
 
                 XmlElement tableCellElement = htmlDocumentFacade.CreateTableCell();
 
-                if (range != null)
+                if(imagesDict.ContainsKey(colIx))
+                {
+                    var image = imagesDict[colIx];
+                    if (image.from.col != image.to.col)
+                        tableCellElement.SetAttribute("colspan", (image.to.col - image.from.col + 1).ToString());
+                    if (image.from.row != image.to.row)
+                        tableCellElement.SetAttribute("rowspan", (image.to.row - image.from.row + 1).ToString());
+
+                    var meta = @"data:image/png;base64, ";
+                    tableCellElement.AppendChild(htmlDocumentFacade.CreateImage(meta + Convert.ToBase64String(image.data)));
+
+                    colIx += image.to.col - image.from.col;
+                }
+                else if (range != null)
                 {
                     if (range.FirstColumn != range.LastColumn)
                         tableCellElement.SetAttribute("colspan", (range.LastColumn - range.FirstColumn + 1).ToString());
                     if (range.FirstRow != range.LastRow)
                         tableCellElement.SetAttribute("rowspan", (range.LastRow - range.FirstRow + 1).ToString());
                 }
-
+                
                 bool emptyCell;
                 if (cell != null)
                 {
@@ -393,22 +387,26 @@ namespace NPOI.SS.Converter
                 {
                     emptyCell = true;
                 }
+                
 
-                if (emptyCell)
-                {
-                    emptyCells.Add(tableCellElement);
-                }
-                else
-                {
-                    foreach (XmlElement emptyCellElement in emptyCells)
-                    {
-                        tableRowElement.AppendChild(emptyCellElement);
-                    }
-                    emptyCells.Clear();
-
-                    tableRowElement.AppendChild(tableCellElement);
-                    maxRenderedColumn = range != null ? range.LastColumn : colIx;
-                }
+                tableRowElement.AppendChild(tableCellElement);
+                maxRenderedColumn = range != null ? range.LastColumn : colIx;
+                
+                //if (emptyCell)
+                //{
+                //    emptyCells.Add(tableCellElement);
+                //}
+                //else
+                //{
+                //    foreach (XmlElement emptyCellElement in emptyCells)
+                //    {
+                //        tableRowElement.AppendChild(emptyCellElement);
+                //    }
+                //    emptyCells.Clear();
+//
+                //    tableRowElement.AppendChild(tableCellElement);
+                //    maxRenderedColumn = range != null ? range.LastColumn : colIx;
+                //}
             }
 
             return maxRenderedColumn + 1;
@@ -546,6 +544,7 @@ namespace NPOI.SS.Converter
                 case CellType.String:
                     // XXX: enrich
                     value = cell.RichStringCellValue.String;
+                    //value = string.IsNullOrWhiteSpace(value) ? "" : value;
                     break;
                 case CellType.Formula:
                     switch (cell.CachedFormulaResultType)
@@ -555,6 +554,7 @@ namespace NPOI.SS.Converter
                             if (str != null && str.Length > 0)
                             {
                                 value = (str.String);
+                                //value = string.IsNullOrWhiteSpace(value) ? "" : value;
                             }
                             else
                             {
@@ -618,16 +618,6 @@ namespace NPOI.SS.Converter
                 {
                     tableCellElement.SetAttribute("class", mainCssClass);
                 }
-
-                if (noText)
-                {
-                    /*
-                     * if cell style is defined (like borders, etc.) but cell text
-                     * is empty, add "&nbsp;" to output, so browser won't collapse
-                     * and ignore cell
-                     */
-                    value = "\u00A0"; //“ ”全角空格
-                }
             }
 
             if (OutputLeadingSpacesAsNonBreaking && value.StartsWith(" "))
@@ -667,7 +657,7 @@ namespace NPOI.SS.Converter
                 innerDivStyle.Append("overflow:hidden;max-height:");
                 innerDivStyle.Append(normalHeightPt);
                 innerDivStyle.Append("pt;white-space:nowrap;");
-                ExcelToHtmlUtils.AppendAlign(innerDivStyle, cellStyle.Alignment);
+                ExcelToHtmlUtils.AppendAlign(innerDivStyle, cellStyle.Alignment, cellStyle.VerticalAlignment);
                 htmlDocumentFacade.AddStyleClass(outerDiv, "d", innerDivStyle.ToString());
 
                 innerDiv.AppendChild(text);
@@ -704,7 +694,7 @@ namespace NPOI.SS.Converter
             {
                 HSSFPalette palette = ((HSSFWorkbook)workbook).GetCustomPalette();
                 style.Append("white-space: pre-wrap; ");
-                ExcelToHtmlUtils.AppendAlign(style, cellStyle.Alignment);
+                ExcelToHtmlUtils.AppendAlign(style, cellStyle.Alignment, cellStyle.VerticalAlignment);
 
                 if (cellStyle.FillPattern == FillPattern.NoFill)
                 {
@@ -728,7 +718,7 @@ namespace NPOI.SS.Converter
             else
             {
                 style.Append("white-space: pre-wrap; ");
-                ExcelToHtmlUtils.AppendAlign(style, cellStyle.Alignment);
+                ExcelToHtmlUtils.AppendAlign(style, cellStyle.Alignment, cellStyle.VerticalAlignment);
 
                 if (cellStyle.FillPattern == FillPattern.NoFill)
                 {
@@ -884,11 +874,12 @@ namespace NPOI.SS.Converter
             }
             if (font.FontHeightInPoints != 0)
                 style.Append("font-size: " + font.FontHeightInPoints + "pt; ");
-
             if (font.IsItalic)
             {
                 style.Append("font-style: italic; ");
             }
+
+            style.Append($"font-family: {font.FontName}");
         }
     }
 }
