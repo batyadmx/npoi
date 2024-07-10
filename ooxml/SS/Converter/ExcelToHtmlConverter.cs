@@ -170,11 +170,14 @@ namespace NPOI.SS.Converter
 
             XmlElement tableBody = htmlDocumentFacade.CreateTableBody();
 
-            CellRangeAddress[][] mergedRanges = ExcelToHtmlUtils.BuildMergedRangesMap(sheet);
 
-            var imagesDict = GetImages(sheet).GroupBy(i => i.from.row)
+            var images = GetImages(sheet);
+            
+            AddMergeRegionsForImages(sheet, images);
+            var imagesDict = images.GroupBy(i => i.from.row)
                 .ToDictionary(g => g.Key, g => g.ToArray());
             
+            CellRangeAddress[][] mergedRanges = ExcelToHtmlUtils.BuildMergedRangesMap(sheet);
             List<XmlElement> emptyRowElements = new List<XmlElement>(physicalNumberOfRows);
             int maxSheetColumns = 1;
             for (int r = 0; r < physicalNumberOfRows; r++)
@@ -225,6 +228,14 @@ namespace NPOI.SS.Converter
             table.AppendChild(tableBody);
 
             htmlDocumentFacade.Body.AppendChild(table);
+        }
+
+        protected void AddMergeRegionsForImages(ISheet sheet, ImageEmbedding[] images)
+        {
+            foreach(var image in images)
+            {
+                sheet.AddMergedRegion(new CellRangeAddress(image.from.row, image.to.row, image.from.col, image.to.col));
+            }
         }
 
         protected ImageEmbedding[] GetImages(ISheet sheet)
@@ -367,8 +378,6 @@ namespace NPOI.SS.Converter
 
                     var meta = @"data:image/png;base64, ";
                     tableCellElement.AppendChild(htmlDocumentFacade.CreateImage(meta + Convert.ToBase64String(image.data)));
-
-                    colIx += image.to.col - image.from.col;
                 }
                 else if (range != null)
                 {
