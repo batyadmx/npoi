@@ -164,8 +164,8 @@ namespace NPOI.SS.Util
                 }
                 if (dx2 < 0) dx2 = 0;
             }
-            anchor.Col2 = (/*setter*/col2);
-            anchor.Dx2 = (/*setter*/dx2);
+            //anchor.Col2 = (/*setter*/col2);
+            //anchor.Dx2 = (/*setter*/dx2);
 
             double h = 0;
             int row2 = anchor.Row1;
@@ -201,8 +201,8 @@ namespace NPOI.SS.Util
                 if (dy2 < 0) dy2 = 0;
             }
 
-            anchor.Row2 = (/*setter*/row2);
-            anchor.Dy2 = (/*setter*/dy2);
+            //anchor.Row2 = (/*setter*/row2);
+            //anchor.Dy2 = (/*setter*/dy2);
 
             Size dim = new Size(
                 (int)Math.Round(scaledWidth * Units.EMU_PER_PIXEL),
@@ -210,6 +210,13 @@ namespace NPOI.SS.Util
             );
 
             return dim;
+        }
+
+        public static Size GetDimensionFromAnchorInPixels(IPicture picture)
+        {
+            Size anchorSize = GetDimensionFromAnchor(picture);
+
+            return new Size(anchorSize.Width / Units.EMU_PER_PIXEL, anchorSize.Height / Units.EMU_PER_PIXEL);
         }
 
         /**
