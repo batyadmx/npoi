@@ -106,6 +106,11 @@ namespace NPOI.XSSF.UserModel
             cell2.colOff = (dx2);
             cell2.row = (row2);
             cell2.rowOff = (dy2);
+            
+            left   = Math.Min(dx1, dx2);
+            top    = Math.Min(dy1, dy2);
+            width  = Math.Abs(dx1 - dx2);
+            height = Math.Abs(dy1 - dy2);
         }
 
         /// <summary>

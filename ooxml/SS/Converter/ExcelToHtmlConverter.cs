@@ -15,6 +15,8 @@
    limitations under the License.
 ==================================================================== */
 
+using System.IO;
+
 namespace NPOI.SS.Converter
 {
     using System;
@@ -171,10 +173,10 @@ namespace NPOI.SS.Converter
             XmlElement tableBody = htmlDocumentFacade.CreateTableBody();
 
 
-            var images = GetImages(sheet);
+            var images = GetPictures(sheet);
             
-            AddMergeRegionsForImages(sheet, images);
-            var imagesDict = images.GroupBy(i => i.from.row)
+            //AddMergeRegionsForPictures(sheet, images);
+            var imagesDict = images.GroupBy(i => i.GetPreferredSize().Row1)
                 .ToDictionary(g => g.Key, g => g.ToArray());
             
             CellRangeAddress[][] mergedRanges = ExcelToHtmlUtils.BuildMergedRangesMap(sheet);
@@ -194,9 +196,9 @@ namespace NPOI.SS.Converter
                 htmlDocumentFacade.AddStyleClass(tableRowElement, "r", "height:"
                         + (row.Height / 20f) + "pt;");
 
-                var rowImages = imagesDict.ContainsKey(r) ? imagesDict[r] : System.Array.Empty<ImageEmbedding>();
+                var rowPictures = imagesDict.ContainsKey(r) ? imagesDict[r] : System.Array.Empty<XSSFPicture>();
                 int maxRowColumnNumber = ProcessRow(mergedRanges, row,
-                        tableRowElement, isNullRow, rowImages);
+                        tableRowElement, isNullRow, rowPictures);
 
                 if (maxRowColumnNumber == 0)
                 {
@@ -230,15 +232,16 @@ namespace NPOI.SS.Converter
             htmlDocumentFacade.Body.AppendChild(table);
         }
 
-        protected void AddMergeRegionsForImages(ISheet sheet, ImageEmbedding[] images)
+        protected void AddMergeRegionsForPictures(ISheet sheet, XSSFPicture[] pictures)
         {
-            foreach(var image in images)
+            foreach(var picture in pictures)
             {
-                sheet.AddMergedRegion(new CellRangeAddress(image.from.row, image.to.row, image.from.col, image.to.col));
+                var anchor = picture.GetPreferredSize();
+                sheet.AddMergedRegion(new CellRangeAddress(anchor.Row1, anchor.Row2, anchor.Col1, anchor.Col2));
             }
         }
 
-        protected ImageEmbedding[] GetImages(ISheet sheet)
+        protected XSSFPicture[] GetPictures(ISheet sheet)
         {
             if(sheet is not XSSFSheet)
                 throw new ArgumentException("Not a XSSFSheet");
@@ -246,36 +249,9 @@ namespace NPOI.SS.Converter
             var drawing = ((XSSFSheet)sheet).GetDrawingPatriarch();
 
             if(drawing is null)
-                return new ImageEmbedding[0];
+                return new XSSFPicture[0];
 
-            var anchors = drawing.GetCTDrawing().CellAnchors.Where(a => a is CT_TwoCellAnchor).ToArray();
-
-            var images = drawing.RelationParts.Where(p => p.DocumentPart is XSSFPictureData).ToArray();
-
-            var res = new ImageEmbedding[anchors.Length];
-
-            for(int i = 0; i < anchors.Length; i++)
-            {
-                var anchor = (CT_TwoCellAnchor)anchors[i];
-                var image = (XSSFPictureData)images[i].DocumentPart;
-                res[i] = new ImageEmbedding(anchor.from, anchor.to, image.Data);
-            }
-
-            return res;
-        }
-
-        protected class ImageEmbedding
-        {
-            internal CT_Marker from;
-            internal CT_Marker to;
-            internal byte[] data;
-
-            public ImageEmbedding(CT_Marker from, CT_Marker to, byte[] data)
-            {
-                this.data=data;
-                this.to=to;
-                this.from=from;
-            }
+            return drawing.GetShapes().Select(s => (XSSFPicture) s).ToArray();
         }
 
         protected void ProcessSheetHeader(XmlElement htmlBody, ISheet sheet)
@@ -326,15 +302,13 @@ namespace NPOI.SS.Converter
      * @return maximum 1-base index of column that were rendered, zero if none
      */
         protected int ProcessRow(CellRangeAddress[][] mergedRanges, IRow row,
-                XmlElement tableRowElement, bool isNullRow, ImageEmbedding[] rowImages)
+                XmlElement tableRowElement, bool isNullRow, XSSFPicture[] rowPictures)
         {
             if (isNullRow)
                 row.CreateCell(0).SetBlank();
-            if(row.Height / 20f < 5)
-                return 0;
-            
+
             ISheet sheet = (ISheet)row.Sheet;
-            var lastImgCol = rowImages.Length != 0 ? rowImages.Select(i => i.from.col).Max() : -1;
+            var lastImgCol = rowPictures.Length != 0 ? rowPictures.Select(i => i.GetPreferredSize().Col1).Max() : -1;
             int maxColIx = Math.Max(row.LastCellNum, lastImgCol + 1);
             if (maxColIx <= 0)
                 return 0;
@@ -348,7 +322,7 @@ namespace NPOI.SS.Converter
                 emptyCells.Add(tableRowNumberCellElement);
             }
 
-            var imagesDict = rowImages.ToDictionary(i => i.from.col);
+            var pictureDict = rowPictures.ToDictionary(i => i.GetPreferredSize().Col1);
             
             int maxRenderedColumn = 0;
             for (int colIx = 0; colIx < maxColIx; colIx++)
@@ -368,16 +342,27 @@ namespace NPOI.SS.Converter
 
                 XmlElement tableCellElement = htmlDocumentFacade.CreateTableCell();
 
-                if(imagesDict.ContainsKey(colIx))
+                if(pictureDict.ContainsKey(colIx))
                 {
-                    var image = imagesDict[colIx];
-                    if (image.from.col != image.to.col)
-                        tableCellElement.SetAttribute("colspan", (image.to.col - image.from.col + 1).ToString());
-                    if (image.from.row != image.to.row)
-                        tableCellElement.SetAttribute("rowspan", (image.to.row - image.from.row + 1).ToString());
+                    var image = pictureDict[colIx];
+                    var div = htmlDocumentFacade.CreateBlock();
+                    div.SetAttribute("style", "position: relative");
+                    var meta = $"data:image/{image.PictureData.SuggestFileExtension()};base64, ";
+                    var imageElem =
+                        htmlDocumentFacade.CreateImage(meta + Convert.ToBase64String(image.PictureData.Data));
+                    
+                    var imageSize = ImageUtils.GetDimensionFromAnchorInPixels(image);
+                    imageElem.SetAttribute("width", imageSize.Width.ToString());
+                    imageElem.SetAttribute("height", imageSize.Height.ToString());
+                    div.AppendChild(imageElem);
+                    
+                    tableCellElement.AppendChild(div);
+                    //var anchor = image.GetPreferredSize();
+                    //if (anchor.Col1 != anchor.Col2)
+                    //    tableCellElement.SetAttribute("colspan", (anchor.Col2 - anchor.Col1 + 1).ToString());
+                    //if (anchor.Row1 != anchor.Row2)
+                    //    tableCellElement.SetAttribute("rowspan", (anchor.Row2 - anchor.Row1 + 1).ToString());
 
-                    var meta = @"data:image/png;base64, ";
-                    tableCellElement.AppendChild(htmlDocumentFacade.CreateImage(meta + Convert.ToBase64String(image.data)));
                 }
                 else if (range != null)
                 {
@@ -553,7 +538,7 @@ namespace NPOI.SS.Converter
                 case CellType.String:
                     // XXX: enrich
                     value = cell.RichStringCellValue.String;
-                    //value = string.IsNullOrWhiteSpace(value) ? "" : value;
+                    value = string.IsNullOrWhiteSpace(value) ? "" : value;
                     break;
                 case CellType.Formula:
                     switch (cell.CachedFormulaResultType)
@@ -563,7 +548,7 @@ namespace NPOI.SS.Converter
                             if (str != null && str.Length > 0)
                             {
                                 value = (str.String);
-                                //value = string.IsNullOrWhiteSpace(value) ? "" : value;
+                                value = string.IsNullOrWhiteSpace(value) ? "" : value;
                             }
                             else
                             {
