@@ -306,7 +306,7 @@ namespace NPOI.SS
             }
 
             //stringBuilder.Append("td:empty::after{ content: \"\\00a0\";}");
-            stringBuilder.Append("img {position:absolute;top:0;left:0}");
+            //stringBuilder.Append("img {position:absolute;top:0;left:0}");
             //stylesheetElement.setTextContent( stringBuilder.toString() );
             stylesheetElement.InnerText = stringBuilder.ToString();
         }

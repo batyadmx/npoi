@@ -175,7 +175,6 @@ namespace NPOI.SS.Converter
 
             var images = GetPictures(sheet);
             
-            //AddMergeRegionsForPictures(sheet, images);
             var imagesDict = images.GroupBy(i => i.GetPreferredSize().Row1)
                 .ToDictionary(g => g.Key, g => g.ToArray());
             
@@ -230,15 +229,6 @@ namespace NPOI.SS.Converter
             table.AppendChild(tableBody);
 
             htmlDocumentFacade.Body.AppendChild(table);
-        }
-
-        protected void AddMergeRegionsForPictures(ISheet sheet, XSSFPicture[] pictures)
-        {
-            foreach(var picture in pictures)
-            {
-                var anchor = picture.GetPreferredSize();
-                sheet.AddMergedRegion(new CellRangeAddress(anchor.Row1, anchor.Row2, anchor.Col1, anchor.Col2));
-            }
         }
 
         protected XSSFPicture[] GetPictures(ISheet sheet)
@@ -346,7 +336,6 @@ namespace NPOI.SS.Converter
                 {
                     var image = pictureDict[colIx];
                     var div = htmlDocumentFacade.CreateBlock();
-                    div.SetAttribute("style", "position: relative");
                     var meta = $"data:image/{image.PictureData.SuggestFileExtension()};base64, ";
                     var imageElem =
                         htmlDocumentFacade.CreateImage(meta + Convert.ToBase64String(image.PictureData.Data));
@@ -354,9 +343,11 @@ namespace NPOI.SS.Converter
                     var imageSize = ImageUtils.GetDimensionFromAnchorInPixels(image);
                     imageElem.SetAttribute("width", imageSize.Width.ToString());
                     imageElem.SetAttribute("height", imageSize.Height.ToString());
+                    div.SetAttribute("style", $"position: absolute;width:{imageSize.Width.ToString()}px;height:{imageSize.Height.ToString()}px");
                     div.AppendChild(imageElem);
                     
                     tableCellElement.AppendChild(div);
+                    tableCellElement.SetAttribute("valign", "top");
                     //var anchor = image.GetPreferredSize();
                     //if (anchor.Col1 != anchor.Col2)
                     //    tableCellElement.SetAttribute("colspan", (anchor.Col2 - anchor.Col1 + 1).ToString());
@@ -422,21 +413,29 @@ namespace NPOI.SS.Converter
         protected void ProcessColumnWidths(ISheet sheet, int maxSheetColumns,
                 XmlElement table)
         {
+            
             // draw COLS after we know max column number
             XmlElement columnGroup = htmlDocumentFacade.CreateTableColumnGroup();
             if (OutputRowNumbers)
             {
                 columnGroup.AppendChild(htmlDocumentFacade.CreateTableColumn());
             }
+            
+            var tableWidth = 0;
             for (int c = 0; c < maxSheetColumns; c++)
             {
                 if (!OutputHiddenColumns && sheet.IsColumnHidden(c))
                     continue;
 
                 XmlElement col = htmlDocumentFacade.CreateTableColumn();
-                col.SetAttribute("width", GetColumnWidth(sheet, c).ToString());
+                var colWidth = (int)GetColumnWidth(sheet, c);
+                col.SetAttribute("width", colWidth.ToString());
                 columnGroup.AppendChild(col);
+
+                tableWidth += colWidth;
             }
+
+            table.SetAttribute("width", tableWidth.ToString());
             table.AppendChild(columnGroup);
         }
         protected void ProcessColumnHeaders(ISheet sheet, int maxSheetColumns,
@@ -536,7 +535,6 @@ namespace NPOI.SS.Converter
             switch (cell.CellType)
             {
                 case CellType.String:
-                    // XXX: enrich
                     value = cell.RichStringCellValue.String;
                     value = string.IsNullOrWhiteSpace(value) ? "" : value;
                     break;
@@ -630,6 +628,8 @@ namespace NPOI.SS.Converter
                 value = builder.ToString();
             }
 
+            if(value == "")
+                value = "\u00a0";
             XmlText text = htmlDocumentFacade.CreateText(value);
 
             if (wrapInDivs)
@@ -662,6 +662,8 @@ namespace NPOI.SS.Converter
             {
                 tableCellElement.AppendChild(text);
             }
+
+            tableCellElement.SetAttribute("style", "padding: 0;");
 
             return string.IsNullOrEmpty(value) && cellStyleIndex == 0;
         }
