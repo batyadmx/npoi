@@ -255,40 +255,7 @@ namespace NPOI.SS
                 this.titleText.InnerText = value;
             }
         }
-
-        /*
-
-        public string getTitle()
-        {
-            if (title == null)
-                return null;
-
-            //return titleText.getTextContent();
-            return titleText.InnerText;
-        }
-
-        public void setTitle(string titleText)
-        {
-            if (string.IsNullOrEmpty(titleText) && this.title != null)
-            {
-                //this.head.removeChild(this.title);
-                this.title = null;
-                this.titleText = null;
-            }
-
-            if (this.title == null)
-            {
-                this.title = document.CreateElement("title");
-                this.titleText = document.CreateTextNode(titleText);
-                this.title.AppendChild(this.titleText);
-                this.head.AppendChild(title);
-            }
-
-            //this.titleText.setData(titleText);
-            this.titleText.InnerXml = titleText;
-        }
-         */
-
+        
         public void UpdateStylesheet()
         {
             StringBuilder stringBuilder = new StringBuilder();
@@ -307,7 +274,6 @@ namespace NPOI.SS
 
             //stringBuilder.Append("td:empty::after{ content: \"\\00a0\";}");
             //stringBuilder.Append("img {position:absolute;top:0;left:0}");
-            //stylesheetElement.setTextContent( stringBuilder.toString() );
             stylesheetElement.InnerText = stringBuilder.ToString();
         }
     }

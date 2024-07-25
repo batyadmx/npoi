@@ -164,8 +164,8 @@ namespace NPOI.SS.Util
                 }
                 if (dx2 < 0) dx2 = 0;
             }
-            //anchor.Col2 = (/*setter*/col2);
-            //anchor.Dx2 = (/*setter*/dx2);
+            anchor.Col2 = (/*setter*/col2);
+            anchor.Dx2 = (/*setter*/dx2);
 
             double h = 0;
             int row2 = anchor.Row1;
@@ -201,8 +201,8 @@ namespace NPOI.SS.Util
                 if (dy2 < 0) dy2 = 0;
             }
 
-            //anchor.Row2 = (/*setter*/row2);
-            //anchor.Dy2 = (/*setter*/dy2);
+            anchor.Row2 = (/*setter*/row2);
+            anchor.Dy2 = (/*setter*/dy2);
 
             Size dim = new Size(
                 (int)Math.Round(scaledWidth * Units.EMU_PER_PIXEL),
@@ -212,13 +212,19 @@ namespace NPOI.SS.Util
             return dim;
         }
 
-        public static Size GetDimensionFromAnchorInPixels(IPicture picture)
+        public static Size GetPictureOffsetInPixels(IPicture picture)
         {
-            Size anchorSize = GetDimensionFromAnchor(picture);
+            IClientAnchor anchor = picture.ClientAnchor;
 
-            return new Size(anchorSize.Width / Units.EMU_PER_PIXEL, anchorSize.Height / Units.EMU_PER_PIXEL);
+            if(anchor is HSSFClientAnchor)
+                throw new ArgumentException("Dont support HSSFPictures");
+
+            var offsetX = (int)Math.Round((double)anchor.Dx1 / Units.EMU_PER_PIXEL);
+            var offsetY = (int)Math.Round((double)anchor.Dy1 / Units.EMU_PER_PIXEL);
+            
+            return new Size(offsetX, offsetY);
         }
-
+        
         /**
          * Calculates the dimensions in EMUs for the anchor of the given picture
          *
@@ -226,6 +232,13 @@ namespace NPOI.SS.Util
          * @return the dimensions in EMUs
          */
         public static Size GetDimensionFromAnchor(IPicture picture)
+        {
+            var dimInPixels = GetPictureDimensionInPixels(picture);
+
+            return new Size(dimInPixels.Width * Units.EMU_PER_PIXEL, dimInPixels.Height * Units.EMU_PER_PIXEL);
+        }
+        
+        public static Size GetPictureDimensionInPixels(IPicture picture)
         {
             IClientAnchor anchor = picture.ClientAnchor;
             bool isHSSF = (anchor is HSSFClientAnchor);
@@ -286,16 +299,11 @@ namespace NPOI.SS.Util
                 h += anchor.Dy2 / (double)Units.EMU_PER_PIXEL;
             }
 
-            w *= Units.EMU_PER_PIXEL;
-            h *= Units.EMU_PER_PIXEL;
-
             return new Size((int)Math.Round(w), (int)Math.Round(h));
-            //return new Size((int)w * Units.EMU_PER_PIXEL, (int)h * Units.EMU_PER_PIXEL);
-
         }
 
 
-        private static double GetRowHeightInPixels(ISheet sheet, int rowNum)
+        public static double GetRowHeightInPixels(ISheet sheet, int rowNum)
         {
             IRow r = sheet.GetRow(rowNum);
             double points = (r == null) ? sheet.DefaultRowHeightInPoints : r.HeightInPoints;
