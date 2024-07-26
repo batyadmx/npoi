@@ -222,7 +222,10 @@ namespace NPOI.SS.Converter
                 tableBody.AppendChild(tableRowElement);
             }
 
-            ProcessColumnWidths(sheet, maxSheetColumns, table);
+            var tableWidth = ProcessColumnWidths(sheet, maxSheetColumns, table);
+            table.SetAttribute("width", tableWidth.ToString(CultureInfo.InvariantCulture));
+            table.SetAttribute("style", $"min-width:{tableWidth}px;");
+            
 
             if(OutputColumnHeaders)
             {
@@ -481,7 +484,7 @@ namespace NPOI.SS.Converter
      * Creates COLGROUP element with width specified for all columns. (Except
      * first if <tt>{@link #isOutputRowNumbers()}==true</tt>)
      */
-        protected void ProcessColumnWidths(ISheet sheet, int maxSheetColumns,
+        protected int ProcessColumnWidths(ISheet sheet, int maxSheetColumns,
             XmlElement table)
         {
             // draw COLS after we know max column number
@@ -504,9 +507,9 @@ namespace NPOI.SS.Converter
 
                 tableWidth += colWidth;
             }
-
-            table.SetAttribute("width", tableWidth.ToString(CultureInfo.InvariantCulture));
             table.AppendChild(columnGroup);
+
+            return tableWidth;
         }
 
         protected void ProcessColumnHeaders(ISheet sheet, int maxSheetColumns,
