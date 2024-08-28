@@ -138,6 +138,7 @@ namespace NPOI.SS.Converter
         }
         
         public bool ApplyTextRotation { get; set; }
+        public bool DisableFormulas { get; set; }
 
         public static XmlDocument Process(string excelFile)
         {
@@ -361,8 +362,11 @@ namespace NPOI.SS.Converter
                 CellRangeAddress range = ExcelToHtmlUtils.GetMergedRange(
                     mergedRanges, row.RowNum, colIx);
 
-                if(range != null && (range.FirstColumn != colIx || range.FirstRow != row.RowNum))
-                    continue;
+                if (range != null && (range.FirstColumn != colIx || range.FirstRow != row.RowNum))
+                {
+	                colIx = range.LastColumn;
+	                continue;
+                }
 
                 ICell cell = row.GetCell(colIx);
 
@@ -413,8 +417,9 @@ namespace NPOI.SS.Converter
                     div.AppendChild(imageElem);
 
                     tableCellElement.AppendChild(div);
+                    tableCellElement.Attributes["style"].Value += "position:relative;";
                 }
-                else if(range != null)
+                if(range != null)
                 {
                     if(range.FirstColumn != range.LastColumn)
                         tableCellElement.SetAttribute("colspan", (range.LastColumn - range.FirstColumn + 1).ToString());
@@ -453,6 +458,8 @@ namespace NPOI.SS.Converter
             sb.Append($"height:{imgSize.Height}px;");
             sb.Append($"margin-top:{offset.Height}px;");
             sb.Append($"margin-left:{offset.Width}px;");
+            sb.Append("top:0px;");
+            sb.Append("left:0px;");
 
             return sb.ToString();
         }
@@ -618,6 +625,11 @@ namespace NPOI.SS.Converter
                     value = string.IsNullOrWhiteSpace(value) ? "" : value;
                     break;
                 case CellType.Formula:
+	                if (DisableFormulas)
+	                {
+		                value = "";
+		                break;
+	                }
                     switch(cell.CachedFormulaResultType)
                     {
                         case CellType.String:
@@ -1000,7 +1012,7 @@ namespace NPOI.SS.Converter
             }
 
             if(font.FontHeightInPoints != 0)
-                style.Append("font-size: " + font.FontHeightInPoints + "pt; ");
+                style.Append("font-size: " + font.FontHeightInPoints.ToString(CultureInfo.InvariantCulture) + "pt; ");
             if(font.IsItalic)
             {
                 style.Append("font-style: italic; ");
