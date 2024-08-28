@@ -24,6 +24,13 @@ namespace NPOI.SS.Converter
             File.WriteAllBytes(path, result.ToArray());
         }
 
+        public byte[] ConvertToXlsxFile(byte[] xlsWorkbook)
+        {
+	        var stream = new MemoryStream(xlsWorkbook);
+
+	        return Convert(stream).ToArray();
+        }
+
         /// <summary>
         /// Создание из файла xls файла xlsx по указанному пути
         /// </summary>
