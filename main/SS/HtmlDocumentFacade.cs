@@ -99,6 +99,20 @@ namespace NPOI.SS
             return document.CreateElement("div");
         }
 
+        public XmlElement CreateSup(string value)
+        {
+            var el = document.CreateElement("sup");
+            el.InnerText = value;
+            return el;
+        }
+        
+        public XmlElement CreateSub(string value)
+        {
+            var el = document.CreateElement("sub");
+            el.InnerText = value;
+            return el;
+        }
+
         public XmlElement CreateBookmark(string name)
         {
             XmlElement basicLink = document.CreateElement("a");

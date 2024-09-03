@@ -2,6 +2,7 @@
 using NPOI.SS.UserModel;
 using NPOI.SS.Util;
 using NPOI.Util;
+using NPOI.XSSF.Model;
 using NPOI.XSSF.UserModel;
 using System.Collections.Generic;
 using System.IO;
@@ -59,7 +60,7 @@ namespace NPOI.SS.Converter
             // Создание объекта для будущего xlsx
             var destination = new XSSFWorkbook();
             // Копируем листы из xls и доабвляем в xlsx
-            for(int i = 0; i < source.NumberOfSheets; i++)
+            for(int i = 0; i < 1; i++)
             {
                 var xssfSheet = (XSSFSheet) destination.CreateSheet(source.GetSheetAt(i).SheetName);
                 var hssfSheet = (HSSFSheet) source.GetSheetAt(i);
@@ -127,6 +128,7 @@ namespace NPOI.SS.Converter
             toCellStyle.TopBorderColor = fromCellStyle.TopBorderColor;
             toCellStyle.VerticalAlignment = fromCellStyle.VerticalAlignment;
             toCellStyle.WrapText = fromCellStyle.WrapText;
+            toCellStyle.SetFont(toWorkbook.GetFontAt((short) (fromCellStyle.GetFont(fromWorkbook).Index + 1)));
             toCellStyle.SetFont(toWorkbook.GetFontAt((short) (fromCellStyle.GetFont(fromWorkbook).Index + 1)));
         }
 
@@ -269,7 +271,7 @@ namespace NPOI.SS.Converter
             switch(oldCell.CellType)
             {
                 case CellType.String:
-                    newCell.SetCellValue(oldCell.StringCellValue);
+                    newCell.SetCellValue(CopyRichTextString((HSSFRichTextString)oldCell.RichStringCellValue, oldCell.Sheet.Workbook));
                     break;
                 case CellType.Numeric:
                     newCell.SetCellValue(oldCell.NumericCellValue);
@@ -289,6 +291,32 @@ namespace NPOI.SS.Converter
                 default:
                     break;
             }
+        }
+
+        private XSSFRichTextString CopyRichTextString(HSSFRichTextString richTextString, IWorkbook workbook)
+        {
+            var xssfRichTextString = new XSSFRichTextString();
+            xssfRichTextString.String = richTextString.String;
+            var prev = 0;
+            for(var i = 1; i < richTextString.NumFormattingRuns; i++)
+            {
+                var curIndex = richTextString.GetIndexOfFormattingRun(i);
+                var prevFontIndex = richTextString.GetFontAtIndex(prev);
+                var prevFont = workbook.GetFontAt(prevFontIndex);
+                
+                xssfRichTextString.ApplyFont(prev, curIndex, ConvertToXssfFont(prevFont));
+                prev = curIndex;
+            }
+            xssfRichTextString.ApplyFont(prev, richTextString.String.Length, ConvertToXssfFont(workbook.GetFontAt(richTextString.GetFontAtIndex(prev))));
+    
+            return xssfRichTextString;
+        }
+
+        private XSSFFont ConvertToXssfFont(IFont font)
+        {
+            var xssfFont = new XSSFFont();
+            xssfFont.CloneStyleFrom(font);
+            return xssfFont;
         }
 
         private void CopyCellStyle(HSSFCell oldCell, XSSFCell newCell)

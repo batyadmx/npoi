@@ -618,11 +618,18 @@ namespace NPOI.SS.Converter
             ICellStyle cellStyle = cell.CellStyle;
 
             string value;
+            var isRichString = false;
             switch(cell.CellType)
             {
                 case CellType.String:
                     value = cell.RichStringCellValue.String;
-                    value = string.IsNullOrWhiteSpace(value) ? "" : value;
+                    if(!string.IsNullOrWhiteSpace(value))
+                    {
+                        isRichString = true;
+                        AddRichString((XSSFRichTextString)cell.RichStringCellValue, tableCellElement);
+                        break;
+                    }
+                    value = "";
                     break;
                 case CellType.Formula:
 	                if (DisableFormulas)
@@ -710,6 +717,9 @@ namespace NPOI.SS.Converter
                 }
             }
 
+            if(isRichString)
+                return false;
+
             if(OutputLeadingSpacesAsNonBreaking && value.StartsWith(" "))
             {
                 StringBuilder builder = new StringBuilder();
@@ -777,6 +787,24 @@ namespace NPOI.SS.Converter
                 tableCellElement.Attributes["style"].Value += $"mso-rotate:{cellStyle.Rotation};";
 
             return string.IsNullOrEmpty(value) && cellStyleIndex == 0;
+        }
+
+        protected void AddRichString(XSSFRichTextString richTextString, XmlElement tableCell)
+        {
+            var prev = 0;
+            for(var i = 1; i <= richTextString.NumFormattingRuns; i++)
+            {
+                var cur = i != richTextString.NumFormattingRuns ? richTextString.GetIndexOfFormattingRun(i) : richTextString.String.Length;
+                var font =  richTextString.GetFontAtIndex(prev);
+                var text = richTextString.String.Substring(prev, cur - prev);
+                prev = cur;
+                if(font.TypeOffset == FontSuperScript.None)
+                    tableCell.AppendChild(htmlDocumentFacade.CreateText(text));
+                else if (font.TypeOffset == FontSuperScript.Super)
+                    tableCell.AppendChild(htmlDocumentFacade.CreateSup(text));
+                else
+                    tableCell.AppendChild(htmlDocumentFacade.CreateSub(text));
+            }
         }
 
         protected string GetRotationClassName(ICell cell, int rotationInDegrees)
