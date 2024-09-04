@@ -14,6 +14,7 @@
    See the License for the specific language governing permissions and
    limitations under the License.
 ==================================================================== */
+
 namespace NPOI.SS.Util
 {
     using System;
@@ -212,17 +213,24 @@ namespace NPOI.SS.Util
             return dim;
         }
 
-        public static Size GetPictureOffsetInPixels(IPicture picture)
+        public static Point GetAnchorOffsetInPixels(IClientAnchor anchor, ISheet sheet)
         {
-            IClientAnchor anchor = picture.ClientAnchor;
-
+            double offsetX;
+            double offsetY;
             if(anchor is HSSFClientAnchor)
-                throw new ArgumentException("Dont support HSSFPictures");
-
-            var offsetX = (int)Math.Round((double)anchor.Dx1 / Units.EMU_PER_PIXEL);
-            var offsetY = (int)Math.Round((double)anchor.Dy1 / Units.EMU_PER_PIXEL);
+            {
+                var colWidth = sheet.GetColumnWidthInPixels(anchor.Col1);
+                var rowHeight = GetRowHeightInPixels(sheet, anchor.Row1);
+                offsetX = colWidth * anchor.Dx1 / 1024d;
+                offsetY = rowHeight * anchor.Dy1 / 256d;
+            }
+            else
+            {
+                offsetX = (double) anchor.Dx1 / Units.EMU_PER_PIXEL;
+                offsetY = (double) anchor.Dy1 / Units.EMU_PER_PIXEL;
+            }
             
-            return new Size(offsetX, offsetY);
+            return new Point((int)Math.Round(offsetX), (int)Math.Round(offsetY));
         }
         
         /**
@@ -243,6 +251,68 @@ namespace NPOI.SS.Util
             IClientAnchor anchor = picture.ClientAnchor;
             bool isHSSF = (anchor is HSSFClientAnchor);
             ISheet sheet = picture.Sheet;
+
+            double w = 0;
+            int col2 = anchor.Col1;
+
+            //space in the leftmost cell
+            w = sheet.GetColumnWidthInPixels(col2++);
+            if (isHSSF)
+            {
+                w *= 1 - anchor.Dx1 / 1024d;
+            }
+            else
+            {
+                w -= anchor.Dx1 / (double)Units.EMU_PER_PIXEL;
+            }
+
+            while (col2 < anchor.Col2)
+            {
+                w += sheet.GetColumnWidthInPixels(col2++);
+            }
+
+            if (isHSSF)
+            {
+                w += sheet.GetColumnWidthInPixels(col2) * anchor.Dx2 / 1024d;
+            }
+            else
+            {
+                w += anchor.Dx2 / (double)Units.EMU_PER_PIXEL;
+            }
+
+            double h = 0;
+            int row2 = anchor.Row1;
+
+            h = GetRowHeightInPixels(sheet, row2++);
+            if (isHSSF)
+            {
+                h *= 1 - anchor.Dy1 / 256d;
+            }
+            else
+            {
+                h -= anchor.Dy1 / (double)Units.EMU_PER_PIXEL;
+            }
+
+            while (row2 < anchor.Row2)
+            {
+                h += GetRowHeightInPixels(sheet, row2++);
+            }
+
+            if (isHSSF)
+            {
+                h += GetRowHeightInPixels(sheet, row2) * anchor.Dy2 / 256;
+            }
+            else
+            {
+                h += anchor.Dy2 / (double)Units.EMU_PER_PIXEL;
+            }
+
+            return new Size((int)Math.Round(w), (int)Math.Round(h));
+        }
+
+        public static Size GetAnchorDimensionsInPixels(IClientAnchor anchor, ISheet sheet)
+        {
+            bool isHSSF = anchor is HSSFClientAnchor;
 
             double w = 0;
             int col2 = anchor.Col1;

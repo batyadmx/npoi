@@ -136,7 +136,7 @@ namespace NPOI.SS.Converter
             get { return useDivsToSpan; }
             set { useDivsToSpan = value; }
         }
-        
+
         public bool ApplyTextRotation { get; set; }
         public bool DisableFormulas { get; set; }
 
@@ -182,7 +182,7 @@ namespace NPOI.SS.Converter
         protected void ProcessSheet(ISheet sheet)
         {
             ProcessSheetHeader(htmlDocumentFacade.Body, sheet);
-            
+
             int lastNotEmptyRowNum = GetLastNotEmptyRowNum(sheet);
             if(lastNotEmptyRowNum <= 0)
                 return;
@@ -192,14 +192,14 @@ namespace NPOI.SS.Converter
 
             var tableBody = htmlDocumentFacade.CreateTableBody();
 
-            var images = GetPictures(sheet);
+            var images = GetPicturesAndShapes(sheet).Where(x => x is not null).ToArray();
 
-            var imagesDict = images.GroupBy(i => i.GetPreferredSize().Row1)
+            var imagesDict = images.GroupBy(i => i.CellCoordinates.Row)
                 .ToDictionary(g => g.Key, g => g.ToArray());
 
             var mergedRanges = ExcelToHtmlUtils.BuildMergedRangesMap(sheet);
             int maxSheetColumns = GetLastColumn(sheet, lastNotEmptyRowNum);
-            
+
             for(int r = 0; r <= lastNotEmptyRowNum; r++)
             {
                 IRow row = sheet.GetRow(r);
@@ -209,14 +209,14 @@ namespace NPOI.SS.Converter
 
                 if(!OutputHiddenRows && row.ZeroHeight)
                     continue;
-                
+
                 var tableRowElement = htmlDocumentFacade.CreateTableRow();
                 var heightInPx = Units.PointsToPixel(row.HeightInPoints);
                 tableRowElement.SetAttribute("height", heightInPx.ToString(CultureInfo.InvariantCulture));
                 htmlDocumentFacade.AddStyleClass(tableRowElement, "r", "height:"
                                                                        + heightInPx + "px;");
 
-                var rowPictures = imagesDict.ContainsKey(r) ? imagesDict[r] : System.Array.Empty<XSSFPicture>();
+                var rowPictures = imagesDict.ContainsKey(r) ? imagesDict[r] : System.Array.Empty<Picture>();
                 ProcessRow(mergedRanges, row,
                     tableRowElement, isNullRow, rowPictures, maxSheetColumns);
 
@@ -226,7 +226,7 @@ namespace NPOI.SS.Converter
             var tableWidth = ProcessColumnWidths(sheet, maxSheetColumns, table);
             table.SetAttribute("width", tableWidth.ToString(CultureInfo.InvariantCulture));
             table.SetAttribute("style", $"min-width:{tableWidth}px;");
-            
+
 
             if(OutputColumnHeaders)
             {
@@ -271,17 +271,103 @@ namespace NPOI.SS.Converter
             return lastColumn;
         }
 
-        protected XSSFPicture[] GetPictures(ISheet sheet)
+        protected Picture[] GetPicturesAndShapes(ISheet sheet)
         {
-            if(sheet is not XSSFSheet)
-                throw new ArgumentException("Not a XSSFSheet");
+            if(sheet is XSSFSheet xssfSheet)
+                return GetXSSFPicturesAndShapes(xssfSheet);
+            if(sheet is HSSFSheet hssfSheet)
+                return GetHSSFPicturesAndShapes(hssfSheet);
+            return System.Array.Empty<Picture>();
+        }
 
-            var drawing = ((XSSFSheet) sheet).GetDrawingPatriarch();
+        protected Picture[] GetXSSFPicturesAndShapes(XSSFSheet sheet)
+        {
+            var drawing = sheet.GetDrawingPatriarch();
+            return drawing.GetShapes().Select(s => ConvertShapeToPicture(s, sheet)).ToArray();
+        }
 
-            if(drawing is null)
-                return System.Array.Empty<XSSFPicture>();
+        protected Picture[] GetHSSFPicturesAndShapes(HSSFSheet sheet)
+        {
+            var drawing = (HSSFPatriarch) sheet.DrawingPatriarch;
+            return drawing.GetShapes().Select(s => ConvertShapeToPicture(s, sheet)).ToArray();
+        }
 
-            return drawing.GetShapes().Select(s => (XSSFPicture) s).ToArray();
+        protected Picture ConvertShapeToPicture(XSSFShape shape, ISheet sheet)
+        {
+            if(shape is XSSFPicture picture)
+                return CreatePicture(picture.PictureData.Data, picture.PictureData.SuggestFileExtension(),
+                    picture.ClientAnchor, picture.Sheet);
+
+            if(shape is XSSFSimpleShape simpleShape)
+                return ConvertSimpleShapeToPicture(simpleShape, sheet);
+
+            return null;
+        }
+
+        protected Picture ConvertShapeToPicture(HSSFShape shape, ISheet sheet)
+        {
+            if(shape is HSSFPicture picture)
+                return CreatePicture(picture.PictureData.Data, picture.PictureData.SuggestFileExtension(),
+                    picture.ClientAnchor, picture.Sheet);
+
+            if(shape is HSSFSimpleShape simpleShape)
+                return ConvertSimpleShapeToPicture(simpleShape, sheet);
+
+            return null;
+        }
+
+        protected Picture ConvertSimpleShapeToPicture(HSSFSimpleShape shape, ISheet sheet)
+        {
+            if(shape.Anchor is not HSSFClientAnchor clientAnchor)
+                return null;
+
+            if (TryGetSimpleShapeData("xls", shape.ShapeType, out var data))
+                return CreatePicture(data.data, data.extension, clientAnchor, sheet);
+
+            return null;
+        }
+        
+        protected Picture ConvertSimpleShapeToPicture(XSSFSimpleShape shape, ISheet sheet)
+        {
+            if(shape.anchor is not XSSFClientAnchor clientAnchor)
+                return null;
+
+            if (TryGetSimpleShapeData("xlsx", shape.ShapeType, out var data))
+                return CreatePicture(data.data, data.extension, clientAnchor, sheet);
+
+            return null;
+        }
+
+        private Dictionary<string, Dictionary<int, (byte[], string)>> cache = new ();
+
+        protected bool TryGetSimpleShapeData(string path, int id, out (byte[] data, string extension) data)
+        {
+            if(!cache.ContainsKey(path))
+                cache[path] = new Dictionary<int, (byte[], string)>();
+
+            if(cache[path].TryGetValue(id, out data))
+                return true;
+
+            var fileName = Directory
+                .GetFiles(path).SingleOrDefault(x => Path.GetFileNameWithoutExtension(x) == id.ToString());
+
+            if(fileName == null)
+                return false;
+
+            data = (File.ReadAllBytes(fileName), Path.GetExtension(fileName));
+            cache[path][id] = data;
+            return true;
+        }
+
+        protected Picture CreatePicture(byte[] data, string extension, IClientAnchor anchor, ISheet sheet)
+        {
+            return new Picture() {
+                Data = data,
+                Extension = extension,
+                CellCoordinates = new CellCoordinates(anchor.Col1, anchor.Row1),
+                Offset = ImageUtils.GetAnchorOffsetInPixels(anchor, sheet),
+                Size = ImageUtils.GetAnchorDimensionsInPixels(anchor, sheet)
+            };
         }
 
         protected void ProcessSheetHeader(XmlElement htmlBody, ISheet sheet)
@@ -331,13 +417,13 @@ namespace NPOI.SS.Converter
         }
 
         protected void ProcessRow(CellRangeAddress[][] mergedRanges, IRow row,
-            XmlElement tableRowElement, bool isNullRow, XSSFPicture[] rowPictures, int maxCollNumTotal)
+            XmlElement tableRowElement, bool isNullRow, Picture[] rowPictures, int maxCollNumTotal)
         {
             if(isNullRow)
                 row.CreateCell(0).SetBlank();
 
             ISheet sheet = (ISheet) row.Sheet;
-            var lastImgCol = rowPictures.Length != 0 ? rowPictures.Select(i => i.GetPreferredSize().Col1).Max() : -1;
+            var lastImgCol = rowPictures.Length != 0 ? rowPictures.Select(i => i.CellCoordinates.Column).Max() : -1;
             int maxRowColIx = Math.Max(row.LastCellNum, lastImgCol + 1);
             if(maxRowColIx <= 0)
                 return;
@@ -351,7 +437,7 @@ namespace NPOI.SS.Converter
                 emptyCells.Add(tableRowNumberCellElement);
             }
 
-            var pictureDict = rowPictures.ToDictionary(i => i.GetPreferredSize().Col1);
+            var pictureDict = rowPictures.ToDictionary(i => i.CellCoordinates.Column);
 
             int maxRenderedColumn = 0;
             for(int colIx = 0; colIx < maxRowColIx; colIx++)
@@ -362,10 +448,10 @@ namespace NPOI.SS.Converter
                 CellRangeAddress range = ExcelToHtmlUtils.GetMergedRange(
                     mergedRanges, row.RowNum, colIx);
 
-                if (range != null && (range.FirstColumn != colIx || range.FirstRow != row.RowNum))
+                if(range != null && (range.FirstColumn != colIx || range.FirstRow != row.RowNum))
                 {
-	                colIx = range.LastColumn;
-	                continue;
+                    colIx = range.LastColumn;
+                    continue;
                 }
 
                 ICell cell = row.GetCell(colIx);
@@ -392,7 +478,7 @@ namespace NPOI.SS.Converter
 
                 XmlElement tableCellElement = htmlDocumentFacade.CreateTableCell();
                 tableCellElement.SetAttribute("style", "padding: 0px;");
-                
+
                 int width;
                 if(range != null)
                     width = GetCellWidth(sheet, range.FirstColumn, range.LastColumn);
@@ -403,22 +489,21 @@ namespace NPOI.SS.Converter
 
                 if(pictureDict.ContainsKey(colIx))
                 {
-                    var image = pictureDict[colIx];
+                    var picture = pictureDict[colIx];
                     var div = htmlDocumentFacade.CreateBlock();
-                    var meta = $"data:image/{image.PictureData.SuggestFileExtension()};base64, ";
+                    var meta = $"data:image/{picture.Extension};base64, ";
                     var imageElem =
-                        htmlDocumentFacade.CreateImage(meta + Convert.ToBase64String(image.PictureData.Data));
+                        htmlDocumentFacade.CreateImage(meta + Convert.ToBase64String(picture.Data));
 
-                    var imageSize = ImageUtils.GetPictureDimensionInPixels(image);
-                    var imageOffset = ImageUtils.GetPictureOffsetInPixels(image);
-                    imageElem.SetAttribute("width", imageSize.Width.ToString(CultureInfo.InvariantCulture));
-                    imageElem.SetAttribute("height", imageSize.Height.ToString(CultureInfo.InvariantCulture));
-                    div.SetAttribute("style", BuildStyleForImageDiv(imageSize, imageOffset));
+                    imageElem.SetAttribute("width", picture.Size.Width.ToString(CultureInfo.InvariantCulture));
+                    imageElem.SetAttribute("height", picture.Size.Height.ToString(CultureInfo.InvariantCulture));
+                    div.SetAttribute("style", BuildStyleForImageDiv(picture.Size, picture.Offset));
                     div.AppendChild(imageElem);
 
                     tableCellElement.AppendChild(div);
                     tableCellElement.Attributes["style"].Value += "position:relative;";
                 }
+
                 if(range != null)
                 {
                     if(range.FirstColumn != range.LastColumn)
@@ -432,9 +517,9 @@ namespace NPOI.SS.Converter
 
                 tableRowElement.AppendChild(tableCellElement);
             }
-            
+
             // creates a cell to fill the row to make all rows same width
-            
+
             if(maxRowColIx < maxCollNumTotal)
             {
                 var cell = htmlDocumentFacade.CreateTableCell();
@@ -449,15 +534,15 @@ namespace NPOI.SS.Converter
             }
         }
 
-        private string BuildStyleForImageDiv(Size imgSize, Size offset)
+        private string BuildStyleForImageDiv(Size imgSize, Point offset)
         {
             var sb = new StringBuilder();
 
             sb.Append("position: absolute;");
             sb.Append($"width:{imgSize.Width}px;");
             sb.Append($"height:{imgSize.Height}px;");
-            sb.Append($"margin-top:{offset.Height}px;");
-            sb.Append($"margin-left:{offset.Width}px;");
+            sb.Append($"margin-top:{offset.Y}px;");
+            sb.Append($"margin-left:{offset.X}px;");
             sb.Append("top:0px;");
             sb.Append("left:0px;");
 
@@ -514,6 +599,7 @@ namespace NPOI.SS.Converter
 
                 tableWidth += colWidth;
             }
+
             table.AppendChild(columnGroup);
 
             return tableWidth;
@@ -552,66 +638,6 @@ namespace NPOI.SS.Converter
             return (columnIndex + 1).ToString();
         }
 
-        protected bool IsTextEmpty(ICell cell)
-        {
-            string value;
-            switch(cell.CellType)
-            {
-                case CellType.String:
-                    // XXX: enrich
-                    value = cell.RichStringCellValue.String;
-                    break;
-                case CellType.Formula:
-                    switch(cell.CachedFormulaResultType)
-                    {
-                        case CellType.String:
-                            IRichTextString str = cell.RichStringCellValue as IRichTextString;
-                            if(str == null || str.Length <= 0)
-                                return false;
-
-                            value = str.ToString();
-                            break;
-                        case CellType.Numeric:
-                            ICellStyle style = cell.CellStyle as ICellStyle;
-                            if(style == null)
-                            {
-                                return false;
-                            }
-
-                            value = (_formatter.FormatRawCellContents(cell.NumericCellValue, style.DataFormat,
-                                style.GetDataFormatString()));
-                            break;
-                        case CellType.Boolean:
-                            value = cell.BooleanCellValue.ToString();
-                            break;
-                        case CellType.Error:
-                            value = ErrorEval.GetText(cell.ErrorCellValue);
-                            break;
-                        default:
-                            value = string.Empty;
-                            break;
-                    }
-
-                    break;
-                case CellType.Blank:
-                    value = string.Empty;
-                    break;
-                case CellType.Numeric:
-                    value = _formatter.FormatCellValue(cell);
-                    break;
-                case CellType.Boolean:
-                    value = cell.BooleanCellValue.ToString();
-                    break;
-                case CellType.Error:
-                    value = ErrorEval.GetText(cell.ErrorCellValue);
-                    break;
-                default:
-                    return true;
-            }
-
-            return string.IsNullOrEmpty(value);
-        }
-
         protected bool ProcessCell(ICell cell, XmlElement tableCellElement,
             double normalWidthPx, double maxSpannedWidthPx, float normalHeightPt)
         {
@@ -626,17 +652,19 @@ namespace NPOI.SS.Converter
                     if(!string.IsNullOrWhiteSpace(value))
                     {
                         isRichString = true;
-                        AddRichString((XSSFRichTextString)cell.RichStringCellValue, tableCellElement);
+                        AddRichString(cell.RichStringCellValue, tableCellElement, cell.Sheet.Workbook);
                         break;
                     }
+
                     value = "";
                     break;
                 case CellType.Formula:
-	                if (DisableFormulas)
-	                {
-		                value = "";
-		                break;
-	                }
+                    if(DisableFormulas)
+                    {
+                        value = "";
+                        break;
+                    }
+
                     switch(cell.CachedFormulaResultType)
                     {
                         case CellType.String:
@@ -739,7 +767,7 @@ namespace NPOI.SS.Converter
             if(value == "" && cell.Row.HeightInPoints > 10)
                 value = "\u00a0";
             XmlText text = htmlDocumentFacade.CreateText(value);
-            
+
             if(cellStyle.Rotation != 0 && ApplyTextRotation)
             {
                 var div = htmlDocumentFacade.CreateBlock();
@@ -781,7 +809,7 @@ namespace NPOI.SS.Converter
             {
                 tableCellElement.AppendChild(text);
             }
-            
+
             // add this style cause microsoft excel does
             if(cellStyle.Rotation != 0)
                 tableCellElement.Attributes["style"].Value += $"mso-rotate:{cellStyle.Rotation};";
@@ -789,18 +817,55 @@ namespace NPOI.SS.Converter
             return string.IsNullOrEmpty(value) && cellStyleIndex == 0;
         }
 
+        protected void AddRichString(IRichTextString richTextString, XmlElement tableCell, IWorkbook workbook)
+        {
+            if (richTextString is XSSFRichTextString xssfRichTextString)
+                AddRichString(xssfRichTextString, tableCell);
+            else if (richTextString is HSSFRichTextString hssfRichTextString)
+                AddRichString(hssfRichTextString, tableCell, workbook);
+        }
+
+        protected void AddRichString(HSSFRichTextString richTextString, XmlElement tableCell, IWorkbook workbook)
+        {
+            var prev = 0;
+            for(var i = 0; i < richTextString.NumFormattingRuns; i++)
+            {
+                var cur = richTextString.GetIndexOfFormattingRun(i);
+                
+                var font = workbook.GetFontAt(richTextString.GetFontAtIndex(prev));
+                var text = richTextString.String.Substring(prev, cur - prev);
+                prev = cur;
+                
+                AppendText(font, text, tableCell);
+            }
+            AppendText(
+                workbook.GetFontAt(richTextString.GetFontAtIndex(prev)), richTextString.String.Substring(prev), tableCell);
+        }
+
+        protected void AppendText(IFont font, string text, XmlElement tableCell)
+        {
+            if(font.TypeOffset == FontSuperScript.None)
+                tableCell.AppendChild(htmlDocumentFacade.CreateText(text));
+            else if(font.TypeOffset == FontSuperScript.Super)
+                tableCell.AppendChild(htmlDocumentFacade.CreateSup(text));
+            else
+                tableCell.AppendChild(htmlDocumentFacade.CreateSub(text));
+        }
+        
         protected void AddRichString(XSSFRichTextString richTextString, XmlElement tableCell)
         {
             var prev = 0;
             for(var i = 1; i <= richTextString.NumFormattingRuns; i++)
             {
-                var cur = i != richTextString.NumFormattingRuns ? richTextString.GetIndexOfFormattingRun(i) : richTextString.String.Length;
-                var font =  richTextString.GetFontAtIndex(prev);
+                var cur = i != richTextString.NumFormattingRuns
+                    ? richTextString.GetIndexOfFormattingRun(i)
+                    : richTextString.String.Length;
+                var font = richTextString.GetFontAtIndex(prev);
                 var text = richTextString.String.Substring(prev, cur - prev);
                 prev = cur;
                 if(font.TypeOffset == FontSuperScript.None)
                     tableCell.AppendChild(htmlDocumentFacade.CreateText(text));
-                else if (font.TypeOffset == FontSuperScript.Super)
+                else if(font.TypeOffset == FontSuperScript.Super)
                     tableCell.AppendChild(htmlDocumentFacade.CreateSup(text));
                 else
                     tableCell.AppendChild(htmlDocumentFacade.CreateSub(text));
@@ -915,7 +980,7 @@ namespace NPOI.SS.Converter
                         XSSFColor backgroundColor = (XSSFColor) cellStyle.FillBackgroundColorColor;
                         if(backgroundColor != null)
                             hexstring = ExcelToHtmlUtils.GetColor(backgroundColor);
-                            hexstring = ExcelToHtmlUtils.GetColor(backgroundColor);
+                        hexstring = ExcelToHtmlUtils.GetColor(backgroundColor);
                     }
 
                     if(hexstring != null)

@@ -4,6 +4,7 @@ using NPOI.SS.Util;
 using NPOI.Util;
 using NPOI.XSSF.Model;
 using NPOI.XSSF.UserModel;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -13,11 +14,6 @@ namespace NPOI.SS.Converter
 {
     public class XlsToXlsxConverter
     {
-        /// <summary>
-        /// Создание из потока xls файла xlsx по указанному пути
-        /// </summary>
-        /// <param name="stream"></param>
-        /// <param name="path"></param>
         public void ConvertToXlsxFile(MemoryStream stream, string path)
         {
             var result = Convert(stream);
@@ -31,12 +27,7 @@ namespace NPOI.SS.Converter
 
 	        return Convert(stream).ToArray();
         }
-
-        /// <summary>
-        /// Создание из файла xls файла xlsx по указанному пути
-        /// </summary>
-        /// <param name="stream"></param>
-        /// <param name="path"></param>
+        
         public void ConvertToXlsxFile(string xlsPath, string destPath)
         {
             MemoryStream result;
@@ -47,20 +38,13 @@ namespace NPOI.SS.Converter
 
             File.WriteAllBytes(destPath, result.ToArray());
         }
-
-        /// <summary>
-        /// Метод инициализирует процесс конвертации
-        /// </summary>
-        /// <param name="sourceStream">Поток с xls</param>
-        /// <returns>Массив байтов (читать в поток)</returns>
+        
         public MemoryStream Convert(Stream sourceStream)
         {
-            // Открытие xls
             var source = new HSSFWorkbook(sourceStream);
-            // Создание объекта для будущего xlsx
             var destination = new XSSFWorkbook();
-            // Копируем листы из xls и доабвляем в xlsx
-            for(int i = 0; i < 1; i++)
+            
+            for(int i = 0; i < source.NumberOfSheets; i++)
             {
                 var xssfSheet = (XSSFSheet) destination.CreateSheet(source.GetSheetAt(i).SheetName);
                 var hssfSheet = (HSSFSheet) source.GetSheetAt(i);
@@ -69,7 +53,6 @@ namespace NPOI.SS.Converter
                 CopySheet(hssfSheet, xssfSheet);
             }
 
-            // Возвращаем сконвертированный результат
             using(var ms = new MemoryStream())
             {
                 destination.Write(ms);
@@ -131,12 +114,7 @@ namespace NPOI.SS.Converter
             toCellStyle.SetFont(toWorkbook.GetFontAt((short) (fromCellStyle.GetFont(fromWorkbook).Index + 1)));
             toCellStyle.SetFont(toWorkbook.GetFontAt((short) (fromCellStyle.GetFont(fromWorkbook).Index + 1)));
         }
-
-        /// <summary>
-        /// Копипрование содержимого листа
-        /// </summary>
-        /// <param name="source"></param>
-        /// <param name="destination"></param>
+        
         private void CopySheet(HSSFSheet source, XSSFSheet destination)
         {
             var maxColumnNum = 0;
@@ -148,7 +126,7 @@ namespace NPOI.SS.Converter
                 if(srcRow != null)
                 {
                     CopyRow(source, destination, srcRow, destRow, mergedRegions);
-                    // поиск максимального номера ячейки в строке для копирования ширины столбцов
+                    
                     if(srcRow.LastCellNum > maxColumnNum)
                     {
                         maxColumnNum = srcRow.LastCellNum;
@@ -156,43 +134,98 @@ namespace NPOI.SS.Converter
                 }
             }
 
-            // копируем ширину столбцов исходного документа
             for(int i = 0; i <= maxColumnNum; i++)
             {
                 destination.SetColumnWidth(i, source.GetColumnWidth(i));
             }
 
-            CopyPictures(source, destination);
+            CopyShapes(source, destination);
         }
 
-        private void CopyPictures(HSSFSheet source, XSSFSheet destination)
+        private void CopyShapes(HSSFSheet source, XSSFSheet destination)
         {
             var hDrawing = (HSSFPatriarch) source.DrawingPatriarch;
             if(hDrawing is null)
                 return;
-            var xDrawing = destination.CreateDrawingPatriarch();
+            var xDrawing = (XSSFDrawing) destination.CreateDrawingPatriarch();
 
             foreach(var shape in hDrawing.GetShapes())
             {
-                var picture = (HSSFPicture) shape;
-                var data = picture.PictureData;
-                var anchor = GetXSSFAnchor(picture, xDrawing);
-                anchor.AnchorType = AnchorType.MoveDontResize;
-
-                var xIndex = destination.Workbook.AddPicture(data.Data, data.PictureType);
-                
-                xDrawing.CreatePicture(anchor, xIndex).GetPreferredSize();
+                if (shape is IPicture picture)
+                    CopyPicture(destination, xDrawing, picture);
+                else if (shape is HSSFSimpleShape simpleShape)
+                    CopySimpleShape(xDrawing, simpleShape, source);
             }
         }
 
-        private IClientAnchor GetXSSFAnchor(HSSFPicture picture, IDrawing xssfDrawing)
+        private void CopySimpleShape(XSSFDrawing drawing, HSSFSimpleShape hssfSimpleShape, HSSFSheet source)
         {
-            var size = picture.GetPreferredSize();
-            var sheet = picture.Sheet;
+            if (hssfSimpleShape.Anchor is not HSSFClientAnchor)
+                return;
 
+            var anchor = GetXSSFAnchor((HSSFClientAnchor)hssfSimpleShape.Anchor, source, drawing);
+            
+            if (anchor is not XSSFClientAnchor)
+                return;
+            
+            if (!TryGetRightShapeType(hssfSimpleShape.ShapeType, out _))
+                return;
+            
+            var xssfSimpleShape = drawing.CreateSimpleShape((XSSFClientAnchor)anchor);
+            CopyShapeData(hssfSimpleShape, xssfSimpleShape);
+        }
+
+        private void CopyShapeData(HSSFSimpleShape source, XSSFSimpleShape dest)
+        {
+            TryGetRightShapeType(source.ShapeType, out var newShapeType);
+            dest.ShapeType = newShapeType;
+            dest.LineWidth = 1;
+            dest.LineStyle = LineStyle.Solid;
+            dest.LineStyleColor = 0x08000040;
+        }
+        
+        private Dictionary<int, int> typeMap;
+
+        private bool TryGetRightShapeType(int shapeType, out int newShapeType)
+        {
+            if (typeMap is null)
+                FillTypeMap();
+
+            return typeMap.TryGetValue(shapeType, out newShapeType);
+        }
+
+        private void FillTypeMap()
+        {
+            typeMap = new Dictionary<int, int>();
+
+            foreach(var value in Enum.GetValues(typeof(HSSFShapeTypes)))
+            {
+                var name = Enum.GetName(typeof(HSSFShapeTypes), value);
+                if(Enum.TryParse(name, true, out ShapeTypes newType))
+                {
+                    typeMap[(int) value] = (int)newType;
+                }
+            }
+        }
+
+        private void CopyPicture(ISheet destination, IDrawing xDrawing, IPicture picture)
+        {
+            var data = picture.PictureData;
+            var anchor = GetXSSFAnchor(picture.GetPreferredSize(), picture.Sheet, xDrawing);
+            anchor.AnchorType = AnchorType.MoveDontResize;
+            
+            var xIndex = destination.Workbook.AddPicture(data.Data, data.PictureType);
+
+            xDrawing.CreatePicture(anchor, xIndex).GetPreferredSize();
+        }
+
+        private IClientAnchor GetXSSFAnchor(IClientAnchor size, ISheet sheet, IDrawing xssfDrawing)
+        {
             var dx1 = size.Dx1 / 1024d * sheet.GetColumnWidthInPixels(size.Col1) * Units.EMU_PER_PIXEL;
             var dx2 = size.Dx2 / 1024d * sheet.GetColumnWidthInPixels(size.Col2) * Units.EMU_PER_PIXEL;
-
+            
+            EnsureRowExist(sheet, size.Row1);
+            EnsureRowExist(sheet, size.Row2);
             var dy1 = size.Dy1 / 256d * Units.PointsToPixel(sheet.GetRow(size.Row1).HeightInPoints) *
                       Units.EMU_PER_PIXEL;
             var dy2 = size.Dy2 / 256d * Units.PointsToPixel(sheet.GetRow(size.Row2).HeightInPoints) *
@@ -201,19 +234,16 @@ namespace NPOI.SS.Converter
             return xssfDrawing.CreateAnchor((int) dx1, (int) dy1, (int) dx2, (int) dy2, size.Col1, size.Row1, size.Col2,
                 size.Row2);
         }
-
-        /// <summary>
-        /// Копирование содежимого ячеек
-        /// </summary>
-        /// <param name="srcSheet"></param>
-        /// <param name="destSheet"></param>
-        /// <param name="srcRow"></param>
-        /// <param name="destRow"></param>
-        /// <param name="mergedRegions"></param>
+        
+        private void EnsureRowExist(ISheet sheet, int rowNum)
+        {
+            if (sheet.GetRow(rowNum) is null)
+                sheet.CreateRow(rowNum);
+        }
+        
         private void CopyRow(HSSFSheet srcSheet, XSSFSheet destSheet, HSSFRow srcRow, XSSFRow destRow,
             List<CellRangeAddress> mergedRegions)
         {
-            // Копирование высоты строки
             destRow.Height = srcRow.Height;
 
             for(int j = srcRow.FirstCellNum; srcRow.LastCellNum >= 0 && j <= srcRow.LastCellNum; j++)
@@ -222,24 +252,21 @@ namespace NPOI.SS.Converter
                 var newCell = (XSSFCell) destRow.GetCell(j);
                 if(oldCell != null)
                 {
-                    // создание новой ячейки в новой таблице
                     if(newCell == null)
                     {
                         newCell = (XSSFCell) destRow.CreateCell(j);
                     }
 
                     CopyCell(oldCell, newCell);
-                    // Ниже идет обработка объединенных ячеек
-                    // Проверка на вхождение текущей ячейки в число объединенных
+                    
                     var mergedRegion = GetMergedRegion(srcSheet, srcRow.RowNum,
                         (short) oldCell.ColumnIndex);
-                    // Если ячейка является объединенное
+                    
                     if(mergedRegion != null)
                     {
-                        // Проверяем обработывали ли мы уже группу объединенных ячеек или нет
                         var newMergedRegion = new CellRangeAddress(mergedRegion.FirstRow,
                             mergedRegion.LastRow, mergedRegion.FirstColumn, mergedRegion.LastColumn);
-                        // Если не обрабатывали, то добавляем в текущий диапазон оъединенных ячеек текущую ячейку
+                        
                         if(IsNewMergedRegion(newMergedRegion, mergedRegions))
                         {
                             mergedRegions.Add(newMergedRegion);
@@ -249,23 +276,13 @@ namespace NPOI.SS.Converter
                 }
             }
         }
-
-        /// <summary>
-        /// Копирование ячеек
-        /// </summary>
-        /// <param name="oldCell"></param>
-        /// <param name="newCell"></param>
+        
         private void CopyCell(HSSFCell oldCell, XSSFCell newCell)
         {
             CopyCellStyle(oldCell, newCell);
             CopyCellValue(oldCell, newCell);
         }
-
-        /// <summary>
-        /// Копирование содержимого ячеек с соранением типа данных
-        /// </summary>
-        /// <param name="oldCell"></param>
-        /// <param name="newCell"></param>
+        
         private void CopyCellValue(HSSFCell oldCell, XSSFCell newCell)
         {
             switch(oldCell.CellType)
@@ -298,7 +315,7 @@ namespace NPOI.SS.Converter
             var xssfRichTextString = new XSSFRichTextString();
             xssfRichTextString.String = richTextString.String;
             var prev = 0;
-            for(var i = 1; i < richTextString.NumFormattingRuns; i++)
+            for(var i = 0; i < richTextString.NumFormattingRuns; i++)
             {
                 var curIndex = richTextString.GetIndexOfFormattingRun(i);
                 var prevFontIndex = richTextString.GetFontAtIndex(prev);
@@ -325,14 +342,7 @@ namespace NPOI.SS.Converter
                 return;
             newCell.CellStyle = newCell.Sheet.Workbook.GetCellStyleAt((short) (oldCell.CellStyle.Index + 1));
         }
-
-        /// <summary>
-        /// Поиск объединенных ячеек
-        /// </summary>
-        /// <param name="sheet"></param>
-        /// <param name="rowNum"></param>
-        /// <param name="cellNum"></param>
-        /// <returns>Коллекция адресов объединенных ячеек</returns>
+        
         private CellRangeAddress GetMergedRegion(HSSFSheet sheet, int rowNum, short cellNum)
         {
             for(var i = 0; i < sheet.NumMergedRegions; i++)
@@ -346,13 +356,7 @@ namespace NPOI.SS.Converter
 
             return null;
         }
-
-        /// <summary>
-        /// Проверка нахождения ячейки в новом объедененном поле, или в уже обработанном
-        /// </summary>
-        /// <param name="newMergedRegion"></param>
-        /// <param name="mergedRegions"></param>
-        /// <returns></returns>
+        
         private bool IsNewMergedRegion(CellRangeAddress newMergedRegion,
             List<CellRangeAddress> mergedRegions)
         {
