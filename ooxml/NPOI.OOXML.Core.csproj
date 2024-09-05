@@ -19,6 +19,12 @@
 
   <ItemGroup>
     <None Remove="XSSF\UserModel\presetTableStyles.xml" />
+    <None Update="SS\Converter\xls\*">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </None>
+    <None Update="SS\Converter\xlsx\*">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </None>
   </ItemGroup>
 
   <ItemGroup>

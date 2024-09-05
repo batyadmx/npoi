@@ -321,7 +321,7 @@ namespace NPOI.SS.Converter
             if(shape.Anchor is not HSSFClientAnchor clientAnchor)
                 return null;
 
-            if (TryGetSimpleShapeData("xls", shape.ShapeType, out var data))
+            if (TryGetSimpleShapeData(@"SS\Converter\xls", shape.ShapeType, out var data))
                 return CreatePicture(data.data, data.extension, clientAnchor, sheet);
 
             return null;
@@ -332,7 +332,7 @@ namespace NPOI.SS.Converter
             if(shape.anchor is not XSSFClientAnchor clientAnchor)
                 return null;
 
-            if (TryGetSimpleShapeData("xlsx", shape.ShapeType, out var data))
+            if (TryGetSimpleShapeData(@"SS\Converter\xlsx", shape.ShapeType, out var data))
                 return CreatePicture(data.data, data.extension, clientAnchor, sheet);
 
             return null;
@@ -347,6 +347,9 @@ namespace NPOI.SS.Converter
 
             if(cache[path].TryGetValue(id, out data))
                 return true;
+
+            if(!Directory.Exists(path))
+                return false;
 
             var fileName = Directory
                 .GetFiles(path).SingleOrDefault(x => Path.GetFileNameWithoutExtension(x) == id.ToString());
