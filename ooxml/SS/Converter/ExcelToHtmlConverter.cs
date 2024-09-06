@@ -65,8 +65,6 @@ namespace NPOI.SS.Converter
 
         private string cssClassTable;
 
-        private Dictionary<short, string> excelStyleToClass = new Dictionary<short, string>();
-
         private Dictionary<int, string> rotationClassNames = new Dictionary<int, string>();
 
         private HtmlDocumentFacade htmlDocumentFacade;
@@ -283,12 +281,20 @@ namespace NPOI.SS.Converter
         protected Picture[] GetXSSFPicturesAndShapes(XSSFSheet sheet)
         {
             var drawing = sheet.GetDrawingPatriarch();
+            
+            if (drawing is null)
+	            return System.Array.Empty<Picture>();
+            
             return drawing.GetShapes().Select(s => ConvertShapeToPicture(s, sheet)).ToArray();
         }
 
         protected Picture[] GetHSSFPicturesAndShapes(HSSFSheet sheet)
         {
             var drawing = (HSSFPatriarch) sheet.DrawingPatriarch;
+
+            if (drawing is null)
+	            return System.Array.Empty<Picture>();
+            
             return drawing.GetShapes().Select(s => ConvertShapeToPicture(s, sheet)).ToArray();
         }
 
@@ -458,23 +464,23 @@ namespace NPOI.SS.Converter
                 }
 
                 ICell cell = row.GetCell(colIx);
-
+				
+                var prevBottom = cell is null ? default : cell.CellStyle.BorderBottom;
+                var prevRight = cell is null ? default : cell.CellStyle.BorderRight;
+                
                 if(range != null)
                 {
                     var bottomCell = row.Sheet.GetRow(range.LastRow)?.GetCell(range.LastColumn);
 
-                    if(cell == null)
+                    if (cell != null && bottomCell != null)
                     {
-                        throw new Exception("Cell in merged region is null");
+	                    if (cell.CellStyle.BorderBottom != bottomCell.CellStyle.BorderBottom ||
+	                        cell.CellStyle.BorderRight != bottomCell.CellStyle.BorderRight)
+	                    {
+		                    cell.CellStyle.BorderBottom = bottomCell.CellStyle.BorderBottom;
+		                    cell.CellStyle.BorderRight = bottomCell.CellStyle.BorderRight;
+	                    }
                     }
-
-                    var newStyle = row.Sheet.Workbook.CreateCellStyle();
-                    newStyle.CloneStyleFrom(cell.CellStyle);
-
-                    newStyle.BorderBottom = bottomCell.CellStyle.BorderBottom;
-                    newStyle.BorderRight = bottomCell.CellStyle.BorderRight;
-
-                    cell.CellStyle = newStyle;
                 }
 
                 double divWidthPx = 0;
@@ -516,9 +522,17 @@ namespace NPOI.SS.Converter
                 }
 
                 if(cell != null)
-                    ProcessCell(cell, tableCellElement, GetColumnWidth(sheet, colIx), divWidthPx, row.Height / 20f);
+                    ProcessCell(cell, tableCellElement, 
+	                    GetColumnWidth(sheet, colIx), divWidthPx, 
+	                    row.Height / 20f);
 
                 tableRowElement.AppendChild(tableCellElement);
+
+                if (cell != null)
+                {
+	                cell.CellStyle.BorderRight = prevRight;
+	                cell.CellStyle.BorderBottom = prevBottom;
+                }
             }
 
             // creates a cell to fill the row to make all rows same width
@@ -747,6 +761,10 @@ namespace NPOI.SS.Converter
                     tableCellElement.SetAttribute("class", mainCssClass);
                 }
             }
+            
+            // add this style cause microsoft excel does
+            if(cellStyle.Rotation != 0 && cellStyle.Rotation >= -180 && cellStyle.Rotation <= 180)
+	            tableCellElement.Attributes["style"].Value += $"mso-rotate:{cellStyle.Rotation};";
 
             if(isRichString)
                 return false;
@@ -812,10 +830,6 @@ namespace NPOI.SS.Converter
             {
                 tableCellElement.AppendChild(text);
             }
-
-            // add this style cause microsoft excel does
-            if(cellStyle.Rotation != 0)
-                tableCellElement.Attributes["style"].Value += $"mso-rotate:{cellStyle.Rotation};";
 
             return string.IsNullOrEmpty(value) && cellStyleIndex == 0;
         }
@@ -901,15 +915,10 @@ namespace NPOI.SS.Converter
 
         protected string GetStyleClassName(IWorkbook workbook, ICellStyle cellStyle)
         {
-            short cellStyleKey = cellStyle.Index;
-
-            if(excelStyleToClass.ContainsKey(cellStyleKey))
-                return excelStyleToClass[cellStyleKey];
-
             String cssStyle = BuildStyle(workbook, cellStyle);
             String cssClass = htmlDocumentFacade.GetOrCreateCssClass("td", "c",
-                cssStyle);
-            excelStyleToClass.Add(cellStyleKey, cssClass);
+	            cssStyle);
+
             return cssClass;
         }
 
